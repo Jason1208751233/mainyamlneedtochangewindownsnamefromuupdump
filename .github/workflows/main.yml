@@ -1,6 +1,10 @@
 name: build-iso
+
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/main.yml'
 
 permissions:
   contents: write
@@ -9,23 +13,25 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2
-
-      - name: Patch genisoimage for large files
-        run: |
-          sudo mv /usr/bin/genisoimage /usr/bin/genisoimage.orig
-          printf '#!/bin/bash\nexec /usr/bin/genisoimage.orig -allow-limited-size "$@"\n' | sudo tee /usr/bin/genisoimage
-          sudo chmod +x /usr/bin/genisoimage
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2 unzip
+
+      - name: Patch genisoimage for large files
+        run: |
+          sudo mv /usr/bin/genisoimage /usr/bin/genisoimage.orig
+          printf '#!/bin/bash\nexec /usr/bin/genisoimage.orig -allow-limited-size "$@"\n' | sudo tee /usr/bin/genisoimage > /dev/null
+          sudo chmod +x /usr/bin/genisoimage
+          genisoimage --version
 
       - name: Run UUP dump script
         run: |
@@ -34,18 +40,39 @@ jobs:
           chmod +x uup_download_linux.sh
           ./uup_download_linux.sh
 
-      - name: Split ISO
+      - name: Locate and split ISO
         run: |
           cd uup
-          ISO=$(ls *.iso | head -n1)
+          echo "== Searching for generated ISO files =="
+          find . -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -20
+
+          # 递归查找当前目录及子目录中最大的 .iso 文件
+          ISO=$(find . -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
+
+          # 兜底：如果当前目录没找到，往上一级（仓库根）再找
+          if [ -z "$ISO" ]; then
+            echo "Not found in ./ , searching parent directory..."
+            ISO=$(find .. -maxdepth 2 -type f -iname "*.iso" -printf '%s %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
+          fi
+
+          if [ -z "$ISO" ]; then
+            echo "Error: ISO file was not generated!"
+            echo "== Directory contents for debugging =="
+            find . .. -maxdepth 3 -type f -printf '%p\n' | head -100
+            exit 1
+          fi
+
+          echo "== Found ISO: $ISO =="
           mv "$ISO" win11.iso
           split -b 1900M -d -a 2 win11.iso win11.iso.part-
           sha256sum win11.iso > SHA256SUMS.txt
-          ls -lh
+          rm -f win11.iso
+          ls -lh win11.iso.part-* SHA256SUMS.txt
 
       - name: Publish to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd uup
-          gh release create v29695 --title "Win11" --notes "auto" win11.iso.part-* SHA256SUMS.txt
+          gh release delete v29695 --cleanup-tag --yes || true
+          gh release create v29695 --title "Win11 29695.1001" --notes "UUP dump build 29695.1001" win11.iso.part-* SHA256SUMS.txt
