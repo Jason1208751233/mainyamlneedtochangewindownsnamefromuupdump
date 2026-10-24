@@ -1,0 +1,40 @@
+name: build-iso
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Run UUP dump script
+        run: |
+          unzip -o uup.zip -d uup
+          cd uup
+          chmod +x uup_download_linux.sh
+          ./uup_download_linux.sh
+
+      - name: Split ISO
+        run: |
+          cd uup
+          ISO=$(ls *.iso | head -n1)
+          mv "$ISO" win11.iso
+          split -b 1900M -d -a 2 win11.iso win11.iso.part-
+          sha256sum win11.iso > SHA256SUMS.txt
+          ls -lh
+
+      - name: Publish to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd uup
+          gh release create v29695 --title "Win11" --notes "auto" win11.iso.part-* SHA256SUMS.txt
