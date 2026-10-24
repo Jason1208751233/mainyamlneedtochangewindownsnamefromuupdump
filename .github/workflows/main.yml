@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2
+          sudo apt-get install -y cabextract wimtools genisoimage chntpw aria2 xorriso
 
       - name: Free disk space
         run: |
@@ -26,6 +26,7 @@ jobs:
           unzip -o uup.zip -d uup
           cd uup
           chmod +x uup_download_linux.sh
+          sed -i 's/\bgenisoimage\b/xorriso -as mkisofs/g' files/converter_multi
           ./uup_download_linux.sh
 
       - name: Split ISO
